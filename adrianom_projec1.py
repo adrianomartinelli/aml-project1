@@ -1,114 +1,11 @@
-#%%
-import numpy as np
-import pandas as pd
+# #%% Isolation tree
+# from sklearn.ensemble import IsolationForest
+# isofor = IsolationForest()
+# isofor_pred = isofor.fit_predict(x_train_scale)
+# idx = isofor_pred == 1
 
-#%%
-from sklearn.pipeline import Pipeline
-
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score
-
-#%% Import data
-x_train = pd.read_csv('./task1/X_train.csv')
-x_train = x_train.iloc[:, 1:]
-
-y_train = pd.read_csv('./task1/Y_train.csv')
-
-
-#%% Find missing values
-# Every row has has missing value with at least 37 up to 88.
-idx = x_train.isnull().any(1)
-nb_missing_v = x_train.isnull().sum(1)
-print(min(nb_missing_v))
-print(max(nb_missing_v))
-
-#%% Impute missing values
-from sklearn.impute import SimpleImputer
-imp_mean = SimpleImputer(strategy='mean')
-x_train_imp = imp_mean.fit_transform(x_train)
-
-#%% Comput distances
-from sklearn.preprocessing import RobustScaler
-from sklearn.cluster import DBSCAN
-from sklearn.metrics import pairwise_distances
-rScaler = RobustScaler(quantile_range=(5.0,95.0))
-
-x_train_scale = rScaler.fit_transform(x_train_imp)
-dist = pairwise_distances(x_train_scale, metric = 'euclidean')
-
-#%%
-kNN = []
-for i in range(dist.shape[1]):
-    kNN.append(np.sort(dist[:,i])[0:10].max())
-
-#%% Plot
-import matplotlib.pyplot as plt
-plt.plot(np.sort(kNN))
-
-#%% DBSCAN
-clustering = DBSCAN(eps=12.5, min_samples=800).fit(x_train_scale)
-
-
-#%% Isolation tree
-from sklearn.ensemble import IsolationForest
-isofor = IsolationForest()
-isofor_pred = isofor.fit_predict(x_train_scale)
-idx = isofor_pred == 1
-
-x_filter = x_train_scale[idx,:]
-y_filter = y_train[idx,:]
-
-#%%
-from sklearn.decomposition import PCA
-pca = PCA(n_components = 50)
-x_pca = pca.fit_transform(x_train_scale)
-
-#%%
-import seaborn as sns; sns.set()
-plt.plot(np.cumsum(pca.explained_variance_ratio_))
-plt.xlabel('number of components')
-plt.ylabel('cumulative explained variance')
-
-#%%
-pca = PCA(n_components = np.min(np.where(np.cumsum(pca.explained_variance_ratio_)>0.8)))
-x_pca = pca.fit_transform(x_filter)
-
-
-#%% from the plot it seems like x_pca[0,0] is an outlier
-plt.scatter(x_pca[0,:], x_pca[1,:])
-
-#%% Regression fit
-from sklearn.svm import SVR
-from sklearn.model_selection import cross_validate
-
-linearsvr = SVR(kernel='linear', degree=3)
-res = cross_validate(linearsvr, x_pca, y_train.iloc[:,1], cv=5, scoring='r2')
-
-#%%
-rbfsvr = SVR(kernel='rbf', degree=3)
-res = cross_validate(rbfsvr, x_pca, y_filter, cv=5, scoring='r2')
-
-#%%
-polysvr = SVR(kernel='poly', degree=3)
-res = cross_validate(polysvr, x_pca, y_filter, cv=5, scoring='r2')
-
-#%% Predict
-estimator = linearsvr.fit(x_pca, y_filter)
-
-x_predict = pd.read_csv('./task1/X_test.csv')
-id = x_predict.iloc[:,0]
-x_predict = x_predict.iloc[:,1:]
-x_predict = imp_mean.transform(x_predict)
-x_predict = rScaler.transform(x_predict)
-x_predict = pca.transform(x_predict)
-res = linearsvr.predict(x_predict)
-
-
-#%%
-id = id.values.reshape(-1,1)
-res = res.reshape(-1,1)
-res = np.concatenate((id,res), axis = 1)
-np.savetxt('result.csv', res, fmt='%10.15f',delimiter=',', header='id,y', comments= '')
+# x_filter = x_train_scale[idx,:]
+# y_filter = y_train[idx,:]
 
 #%% Modules
 import numpy as np
@@ -121,8 +18,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import RobustScaler
 from sklearn.decomposition import PCA
 from sklearn.model_selection import cross_validate, GridSearchCV
-from sklearn.feature_selection import SelectFromModel, mutual_info_regression, f_regression, SelectKBest
-
+from sklearn.linear_model import Lasso, SGDRegressor
+from sklearn.feature_selection import SelectFromModel, mutual_info_regression, SelectKBest, RFE
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.neighbors import LocalOutlierFactor
 #%% Data
 
 ## Training
@@ -151,6 +50,24 @@ pipe = Pipeline([
     ('feature_selection', SelectKBest()),
     ('estimator', SVR())])
 
+pipe2 = Pipeline([
+    ('impute_value', SimpleImputer()),
+    ('scale', RobustScaler()),
+    ('feature_selection', RFE(SVR())),
+    ('estimator', SVR())])   
+
+pipe3 = Pipeline([
+    ('impute_value', SimpleImputer()),
+    ('scale', RobustScaler()),
+    ('feature_selection', RFE(Lasso())),
+    ('estimator', SVR())])   
+
+pipe4 = Pipeline([
+    ('impute_value', SimpleImputer()),
+    ('scale', RobustScaler()),
+    ('feature_selection', RFE(Lasso())),
+    ('estimator', RandomForestRegressor())])   
+
 #%% Parameter Grid
 from functools import partial
 param_grid = [
@@ -163,7 +80,7 @@ param_grid = [
     {'estimator__kernel': ['linear', 'rbf']}
 ]
 
-param_grid2 = [
+param_grid1 = [
     {'impute_value__strategy': ['mean']},
     {'scale__quantile_range': [(20.0,80.0), (30.0,70.0)]},
     {'feature_selection__score_func': [5, 10]},
@@ -173,18 +90,40 @@ param_grid2 = [
     {'estimator__kernel': ['rbf']}
 ]
 
-param_grid1 = [
+param_grid2 = [
     {'impute_value__strategy': ['median', 'mean']},
-    {'scale__quantile_range': [(20.0,80.0), (10.0,90.0)]},
-    {'feature_selection__score_func': [
-        partial(mutual_info_regression, n_neighbors = 5),
-        partial(mutual_info_regression, n_neighbors = 10),
-        partial(mutual_info_regression, n_neighbors = 50)]},
-    {'feature_selection__k': np.array([50, 100, 150, 200])},
-    {'estimator__C': np.array([0.1, 1,10])},
-    {'estimator__degree': np.array([3])},
-    {'estimator__kernel': ['linear', 'rbf']}
+    {'scale__quantile_range': [(20.0,80.0), (30.0, 70.0)]},
+    {'feature_selection__estimator__C': np.array([0.1, 1, 10])},
+    {'feature_selection__n_features_to_select': np.array([50, 100, 150])},
+    {'feature_selection__estimator__gamma': np.array(['scale'])},
+    {'feature_selection__estimator__C': np.array([0.1, 1, 10])},
+    {'estimator__gamma': np.array(['scale'])},
+    {'estimator__epsilon': np.array([0.1, 1])}
 ]
+
+param_grid3 = [
+    {'impute_value__strategy': ['median', 'mean']},
+    {'scale__quantile_range': [(20.0,80.0), (30.0, 70.0)]},
+    {'feature_selection__estimator__alpha': np.array([0.1, 1, 10])},
+    {'feature_selection__n_features_to_select': np.array([50, 100, 150])},
+    {'feature_selection__estimator__alpha': np.array([0.1, 1, 10])},
+    {'estimator__gamma': np.array(['scale'])},
+    {'estimator__epsilon': np.array([0.1, 1])}
+]
+
+param_grid4 = [
+    {'impute_value__strategy': ['median', 'mean']},
+    {'scale__quantile_range': [(20.0,80.0), (30.0, 70.0)]},
+    {'feature_selection__estimator__alpha': np.array([0.1, 1, 10])},
+    {'feature_selection__n_features_to_select': np.array([50, 100, 150])},
+    {'feature_selection__estimator__alpha': np.array([0.1, 1, 10])},
+    {'estimator__n_estimators': np.array([10, 50, 100])},
+    {'estimator__bootstrap': [True, False]},
+    {'estimator__gamma': np.array(['scale'])},
+    {'estimator__epsilon': np.array([0.1, 1])}
+]
+
+
 
 
 #%% Grid search
@@ -256,9 +195,65 @@ res = np.concatenate((iid,res), axis = 1)
 np.savetxt('result.csv', res, fmt='%10.15f',delimiter=',', header='id,y', comments= '')
 
 #%%
-clf = GridSearchCV(pipe, param_grid1, cv=5, scoring = 'r2')
+cv_results = []
+best_score = 0
+best_param = []
+
+pipe4 = Pipeline([
+    ('feature_selection', RFE(Lasso())),
+    ('estimator', RandomForestRegressor())])   
+
+param_grid5 = [
+    {'impute_value__strategy': ['mean']},
+    {'scale__quantile_range': [(20.0,80.0), (30.0, 70.0)]},
+    {'outlier_detection': [[20,30], [10, 15], [80, 30]]},
+    {'feature_selection__estimator__alpha': np.array([0.1, 1, 10])},
+    {'feature_selection__n_features_to_select': np.array([50, 100, 150])},
+    {'feature_selection__estimator__alpha': np.array([0.1, 1, 10])},
+    {'estimator__n_estimators': np.array([10, 50, 100])},
+    {'estimator__max_depth': [None, 30]},
+    {'estimator__bootstrap': [True]}
+]
+
+for a in param_grid2[0]['impute_value__strategy']:
+    for b in param_grid2[1]['scale__quantile_range']:
+        for c in param_grid2[3]['outlier_detection']:
+            #Impute
+            x = SimpleImputer(strategy = a).fit_transform(x_train)
+            #Scale
+            x = RobustScaler(quantile_range = b).fit_transform(x)
+            #Outlier Detection
+            idx = LocalOutlierFactor(n_neighbors= c[0], leaf_size=c[1], contamination = 'auto', p=2, n_jobs= -1).fit_predict(x)
+            x = x[idx == 1]
+            y = y_train[idx == 1]
+
+            clf = GridSearchCV(pipe4, param_grid4, cv=5, scoring = 'r2', n_jobs= -1)
+            res_cv = clf.fit(x, y)
+
+
+#%%
+pipe4 = Pipeline([
+    ('impute_value', SimpleImputer()),
+    ('scale', RobustScaler()),
+    ('feature_selection', RFE(Lasso())),
+    ('estimator', RandomForestRegressor())]) 
+
+param_grid4 = [
+    {'impute_value__strategy': ['median', 'mean'],
+    'scale__quantile_range': [(20.0,80.0), (10.0,90.0), (1.0, 99.0)],
+    'feature_selection__estimator__alpha': [0.1,1,10],
+    'feature_selection__n_features_to_select': [50,100,150],
+    'estimator__n_estimators': [10,50, 100],
+    'estimator__bootstrap': [True],
+    'estimator__max_depth': [None, 30]}
+]
+#%%
+
+clf = GridSearchCV(pipe4, param_grid4, cv=5, scoring = 'r2', n_jobs= -1)
 res_cv = clf.fit(x_train, y_train)
 
+#%%
+res_cv.best_estimator_
 #%% Predict
 res = res_cv.best_estimator_.predict(x_test)
 

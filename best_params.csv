@@ -1,0 +1,3 @@
+,estimator__bootstrap,estimator__max_depth,estimator__n_estimators,feature_selection__estimator__alpha,feature_selection__n_features_to_select,impute_value__strategy,scale__quantile_range
+0,True,30,10,0.1,150,median,20.0
+1,True,30,10,0.1,150,median,80.0
